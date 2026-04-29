@@ -92,7 +92,7 @@ input,select,button,textarea{font-family:inherit;font-size:16px;}
 <div id="root"></div>
 <script>
 const DEF_CATS=["Lácteos","Conservas","Verduras","Frutas","Congelados","Bebidas","Cereales","Carnes","Limpieza","Higiene","Hogar","Otros"];
-const DEF_SUPS=["Mercadona","Lidl","Aldi","Carrefour","Condis","Bon Preu","El Corte Inglés"];
+const DEF_SUPS=["Bon Preu","Ametller","Sorli","Mercadona","Bon Area","La Granja","Can Torrent","Mercat"];
 const KEY="despensa_v3";
 
 function loadState(){
@@ -178,7 +178,7 @@ function renderShopping(){
         <span class="tag ${item.units===0?"t-red":"t-yellow"}">${item.units===0?"Agotado":`${item.units} ud`}</span>
       </div>`;
     });
-    if(hasDone)html+=`<button class="clear-btn" onclick="clearChk()">Limpiar marcados</button>`;
+    if(hasDone)html+=`<button class="clear-btn" onclick="limpiarMarcados()">Limpiar marcados</button>`;
   }
   html+=`</div>`;
   return html;
@@ -263,6 +263,7 @@ function chgUnits(id,d){const i=S.items.find(x=>x.id===id);if(i){i.units=Math.ma
 function delItem(id){if(confirm("¿Eliminar este producto?")){S.items=S.items.filter(i=>i.id!==id);save();render();}}
 function toggleChk(id){checked[id]=!checked[id];render();}
 function clearChk(){checked={};render();}
+function limpiarMarcados(){checked={};render();}
 
 function openAdd(){modal="add";editId=null;window._f={name:"",category:S.cats[0]||"Otros",units:1,expiry:"",supermarket:""};showNewCat=false;showNewSup=false;render();}
 function openEdit(id){modal="edit";editId=id;const item=S.items.find(i=>i.id===id);window._f={...item};showNewCat=false;showNewSup=false;render();}
