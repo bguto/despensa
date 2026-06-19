@@ -35,7 +35,7 @@ input,select,button{font-family:inherit;}
 /* SEARCH */
 .search-wrap{padding:12px 14px 0;background:var(--gp);}
 .search-box{display:flex;align-items:center;gap:8px;background:var(--white);border-radius:11px;border:1px solid var(--gp2);padding:9px 13px;}
-.search-box input{border:none;outline:none;font-size:14px;color:var(--dark);background:transparent;flex:1;width:100%;}
+.search-box input{border:none;outline:none;font-size:16px;color:var(--dark);background:transparent;flex:1;width:100%;}
 .search-box input::placeholder{color:var(--gp3);}
 .search-icon{color:var(--gp3);font-size:14px;flex-shrink:0;}
 
@@ -123,10 +123,25 @@ input,select,button{font-family:inherit;}
 .btn-save{flex:2;padding:14px;border-radius:12px;border:none;background:var(--z);color:#fff;font-size:14px;font-weight:700;cursor:pointer;}
 .btn-save:disabled{background:var(--z4);cursor:default;}
 .btn-danger{width:100%;padding:13px;border-radius:12px;border:1.5px solid var(--red-bg);background:var(--red-bg);font-size:14px;cursor:pointer;color:var(--red);font-weight:500;margin-top:8px;}
+
+/* SCANNER */
+.fab-row{display:flex;gap:9px;}
+.fab-row .fab-btn{flex:1;width:auto;}
+.fab-scan{flex-shrink:0;padding:14px 16px;border-radius:13px;border:1.5px solid var(--z);background:var(--white);color:var(--z);font-size:15px;font-weight:700;cursor:pointer;}
+.scanner-box{width:100%;aspect-ratio:4/3;background:#000;border-radius:14px;overflow:hidden;margin-bottom:10px;position:relative;}
+.scanner-box video{width:100%!important;height:100%!important;object-fit:cover;}
+.scan-msg{font-size:13px;color:var(--gp4);text-align:center;margin-bottom:12px;min-height:18px;line-height:1.35;padding:0 4px;}
+.scan-actions{display:flex;gap:9px;margin-bottom:6px;}
+.scan-actions .add-btn{flex:1;padding:11px 0;text-align:center;}
+.scan-done{text-align:center;padding:22px 0 6px;}
+.scan-done-ic{width:60px;height:60px;border-radius:50%;background:var(--green-bg);color:var(--green);font-size:30px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
+.scan-done-name{font-size:17px;font-weight:700;color:var(--dark);}
+.scan-done-sub{font-size:13px;color:var(--gp4);margin-top:4px;}
 </style>
 </head>
 <body>
 <div id="root"></div>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 const DEF_CATS=["Lácteos","Conservas","Verduras","Frutas","Congelados","Bebidas","Cereales","Carnes","Limpieza","Higiene","Hogar","Otros"];
 const DEF_SUPS=["Bon Preu","Ametller","Sorli","Mercadona","Bon Area","La Granja","Can Torrent","Mercat"];
@@ -149,6 +164,8 @@ let S=loadState();
 let tab="inventory",search="",catF="Todos",supF="Todos",checked={};
 let modal=null,editId=null,buyId=null;
 let showNewCat=false,showNewSup=false;
+let addNote="";
+let scanner=null,scanMsg="",scanResult=null,scanBusy=false,camTried=false;
 
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch{}}
 function daysUntil(d){if(!d)return null;return Math.ceil((new Date(d)-new Date())/86400000);}
@@ -254,7 +271,7 @@ function renderAddEdit(){
     <div class="sheet" onclick="event.stopPropagation()">
       <div class="shandle"></div>
       <div class="stitle">${isEdit?"Editar producto":"Nuevo producto"}</div>
-      ${isEdit?`<div class="ssub">Toca los campos para editar</div>`:""}
+      ${addNote?`<div class="ssub">${esc(addNote)}</div>`:(isEdit?`<div class="ssub">Toca los campos para editar</div>`:"")}
 
       <div class="field">
         <label>Nombre *</label>
@@ -342,6 +359,37 @@ function renderBuy(){
   </div>`;
 }
 
+function renderScan(){
+  let body;
+  if(scanResult&&scanResult.type==="restock"){
+    body=`<div class="scan-done">
+        <div class="scan-done-ic">✓</div>
+        <div class="scan-done-name">${esc(scanResult.name)}</div>
+        <div class="scan-done-sub">Ya lo tenías · stock actualizado a ${scanResult.units} ud</div>
+      </div>
+      <div class="actions">
+        <button class="btn-cancel" onclick="closeScan()">Cerrar</button>
+        <button class="btn-save" onclick="restartScan()">Escanear otro</button>
+      </div>`;
+  } else {
+    body=`<div id="scanner" class="scanner-box"></div>
+      <div class="scan-msg">${esc(scanMsg||"Apunta la cámara al código de barras")}</div>
+      <input type="file" id="scanfile" accept="image/*" style="display:none" onchange="scanFile(this)">
+      <div class="scan-actions">
+        <button class="add-btn" onclick="document.getElementById('scanfile').click()">&#128247; Subir imagen</button>
+        <button class="add-btn" onclick="manualFromScan()">✏️ Manual</button>
+      </div>
+      <div class="actions"><button class="btn-cancel" style="flex:1" onclick="closeScan()">Cancelar</button></div>`;
+  }
+  return`<div class="overlay" id="ovs" onclick="if(event.target.id==='ovs')closeScan()">
+    <div class="sheet" onclick="event.stopPropagation()">
+      <div class="shandle"></div>
+      <div class="stitle">Escanear producto</div>
+      ${body}
+    </div>
+  </div>`;
+}
+
 function render(){
   const shopCount=S.items.filter(i=>needsBuying(i)).length;
   const expired=S.items.filter(i=>{const d=daysUntil(i.expiry);return d!==null&&d<0;}).length;
@@ -364,14 +412,25 @@ function render(){
   </div>`;
 
   h+=tab==="inventory"?renderInventory():renderShopping();
-  h+=`<div class="fab"><button class="fab-btn" onclick="openAdd()">+ Añadir producto</button></div>`;
+  h+=`<div class="fab"><div class="fab-row">
+    <button class="fab-scan" onclick="openScan()">&#128247; Escanear</button>
+    <button class="fab-btn" onclick="openAdd()">+ Añadir producto</button>
+  </div></div>`;
   if(modal==="add"||modal==="edit")h+=renderAddEdit();
   if(modal==="buy")h+=renderBuy();
+  if(modal==="scan")h+=renderScan();
 
   document.getElementById("root").innerHTML=h;
   if(modal==="add"||modal==="edit"){
     const nc=document.getElementById("nc");if(nc)nc.focus();
     const ns=document.getElementById("ns");if(ns)ns.focus();
+  }
+  if(modal==="scan"&&!scanResult&&!scanBusy){
+    const box=document.getElementById("scanner");
+    if(box){
+      if(!window.Html5Qrcode){box.innerHTML="<div class='scan-msg'>Sin conexión a la librería de escaneo. Usa &ldquo;Manual&rdquo;.</div>";}
+      else if(!scanner&&!camTried){camTried=true;startScanner();}
+    }
   }
 }
 
@@ -385,11 +444,145 @@ function confirmDel(id){if(confirm("¿Eliminar este producto?")){delItem(id);clo
 function toggleChk(id){checked[id]=!checked[id];render();}
 function clearChk(){checked={};render();}
 
-function openAdd(){modal="add";editId=null;window._f={name:"",category:S.cats[0]||"Otros",units:1,minStock:1,expiry:"",supermarket:""};showNewCat=false;showNewSup=false;render();}
+function openAdd(){modal="add";editId=null;addNote="";window._f={name:"",category:S.cats[0]||"Otros",units:1,minStock:1,expiry:"",supermarket:""};showNewCat=false;showNewSup=false;render();}
 function openEdit(id){modal="edit";editId=id;const item=S.items.find(i=>i.id===id);window._f={...item};showNewCat=false;showNewSup=false;render();}
 function openBuy(id){modal="buy";buyId=id;window._bf={units:1,expiry:""};render();}
-function closeModal(){modal=null;editId=null;buyId=null;window._f=null;window._bf=null;showNewCat=false;showNewSup=false;render();}
+function closeModal(){modal=null;editId=null;buyId=null;addNote="";window._f=null;window._bf=null;showNewCat=false;showNewSup=false;render();}
 function ovClick(e){if(e.target.id==="ov")closeModal();}
+
+/* ===== ESCÁNER DE CÓDIGO DE BARRAS ===== */
+function getFmts(){
+  if(!window.Html5QrcodeSupportedFormats)return undefined;
+  const F=Html5QrcodeSupportedFormats;
+  return[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF];
+}
+
+function openScan(){modal="scan";scanResult=null;scanMsg="";scanBusy=false;camTried=false;render();}
+function restartScan(){scanResult=null;scanMsg="";scanBusy=false;camTried=false;render();}
+
+function startScanner(){
+  try{
+    scanner=new Html5Qrcode("scanner",{formatsToSupport:getFmts(),verbose:false});
+    scanner.start(
+      {facingMode:"environment"},
+      {fps:10,qrbox:(w,h)=>({width:Math.min(w-24,300),height:Math.min(Math.floor(h*0.5),170)})},
+      txt=>handleCode(txt),
+      ()=>{}
+    ).catch(()=>{
+      scanner=null;
+      scanMsg="No se pudo abrir la cámara. Permite el acceso o usa “Subir imagen”.";
+      render();
+    });
+  }catch(e){
+    scanner=null;
+    scanMsg="Cámara no disponible. Usa “Subir imagen”.";
+    render();
+  }
+}
+
+async function stopScanner(){
+  if(scanner){
+    try{await scanner.stop();}catch{}
+    try{await scanner.clear();}catch{}
+    scanner=null;
+  }
+}
+
+function handleCode(code){
+  if(scanBusy)return;
+  scanBusy=true;
+  processCode(code);
+}
+
+async function scanFile(input){
+  const file=input.files&&input.files[0];
+  if(!file)return;
+  scanBusy=true;
+  await stopScanner();
+  scanMsg="Leyendo imagen…";render();
+  try{
+    const tmp=new Html5Qrcode("scanner",{formatsToSupport:getFmts(),verbose:false});
+    const code=await tmp.scanFile(file,false);
+    try{await tmp.clear();}catch{}
+    processCode(code);
+  }catch(e){
+    scanBusy=false;
+    scanMsg="No se ha leído ningún código en la imagen. Prueba con más luz o más cerca.";
+    camTried=false;render();
+  }
+}
+
+async function processCode(code){
+  await stopScanner();
+  const ex=S.items.find(i=>i.barcode&&i.barcode===code);
+  if(ex){
+    ex.units=(parseInt(ex.units)||0)+1;
+    save();
+    scanResult={type:"restock",name:ex.name,units:ex.units};
+    render();
+    return;
+  }
+  scanMsg="Buscando producto…";render();
+  await lookupBarcode(code);
+}
+
+async function lookupBarcode(code){
+  try{
+    const r=await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_es,generic_name_es,brands,categories,categories_tags`);
+    const d=await r.json();
+    if(d&&d.status===1&&d.product){
+      const p=d.product;
+      let name=(p.product_name_es||p.product_name||p.generic_name_es||"").trim();
+      if(p.brands){
+        const b=p.brands.split(",")[0].trim();
+        if(name&&!name.toLowerCase().includes(b.toLowerCase()))name=`${name} ${b}`;
+        else if(!name)name=b;
+      }
+      if(name){prefillAdd(name,guessCat(p),code,"");return;}
+    }
+    prefillAdd("",S.cats[0]||"Otros",code,`Código ${code} no encontrado, complétalo a mano`);
+  }catch(e){
+    scanBusy=false;camTried=false;
+    scanMsg="Sin conexión para buscar el producto. Pulsa “Manual” para añadirlo a mano.";
+    render();
+  }
+}
+
+function guessCat(p){
+  const tags=((p.categories_tags||[]).join(" ")+" "+(p.categories||"")).toLowerCase();
+  const map=[
+    ["Lácteos",["dairy","milk","yogurt","yoghurt","cheese","lait","leche","queso","yogur"]],
+    ["Bebidas",["beverage","drink","water","juice","soda","bebida","agua","zumo","refresco"]],
+    ["Congelados",["frozen","congel"]],
+    ["Conservas",["canned","conserve","conserva"]],
+    ["Verduras",["vegetable","verdura","legum","legumbre"]],
+    ["Frutas",["fruit","fruta"]],
+    ["Cereales",["cereal","pasta","rice","bread","pan","arroz","harina"]],
+    ["Carnes",["meat","carne","poultry","fish","pescado","embutido","jamon"]],
+    ["Higiene",["hygiene","cosmetic","higiene","shampoo","champu"]],
+    ["Limpieza",["cleaning","detergent","limpieza","detergente"]],
+  ];
+  for(const[cat,kw]of map){if(kw.some(k=>tags.includes(k))&&S.cats.includes(cat))return cat;}
+  return S.cats.includes("Otros")?"Otros":(S.cats[0]||"Otros");
+}
+
+function prefillAdd(name,category,code,note){
+  modal="add";editId=null;addNote=note||"";
+  window._f={name:name||"",category:category||S.cats[0]||"Otros",units:1,minStock:1,expiry:"",supermarket:"",barcode:code||""};
+  showNewCat=false;showNewSup=false;scanBusy=false;
+  render();
+}
+
+async function manualFromScan(){
+  await stopScanner();
+  prefillAdd("",S.cats[0]||"Otros","","");
+}
+
+async function closeScan(){
+  await stopScanner();
+  modal=null;scanResult=null;scanMsg="";scanBusy=false;camTried=false;
+  render();
+}
 
 function setF(k,v){
   if(!window._f)return;
