@@ -24,6 +24,7 @@ input,select,button{font-family:inherit;}
 .hdr{background:var(--z);padding:env(safe-area-inset-top) 16px 0;position:sticky;top:0;z-index:10;}
 .hdr-top{display:flex;align-items:center;justify-content:space-between;padding-top:14px;margin-bottom:8px;}
 .hdr-title{font-size:20px;font-weight:700;color:#fff;letter-spacing:-.3px;}
+.hdr-logout{background:rgba(255,255,255,.15);border:none;color:#fff;font-size:12px;font-weight:600;padding:6px 12px;border-radius:20px;cursor:pointer;}
 .badges{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;}
 .bdg{font-size:11px;padding:3px 9px;border-radius:20px;font-weight:500;background:rgba(255,255,255,.15);color:rgba(255,255,255,.95);}
 .bdg-red{background:rgba(220,80,80,.25);color:#FFB3B3;}
@@ -137,54 +138,249 @@ input,select,button{font-family:inherit;}
 .scan-done-ic{width:60px;height:60px;border-radius:50%;background:var(--green-bg);color:var(--green);font-size:30px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
 .scan-done-name{font-size:17px;font-weight:700;color:var(--dark);}
 .scan-done-sub{font-size:13px;color:var(--gp4);margin-top:4px;}
+
+/* AUTH */
+.auth{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:24px 22px;}
+.auth-logo{font-size:42px;text-align:center;margin-bottom:8px;}
+.auth-title{font-size:22px;font-weight:700;text-align:center;color:var(--dark);margin-bottom:4px;}
+.auth-sub{font-size:13px;color:var(--gp4);text-align:center;margin-bottom:24px;}
+.auth-card{background:var(--white);border-radius:16px;border:1px solid var(--gp2);padding:18px 16px;}
+.auth-card input{width:100%;padding:13px;border-radius:11px;border:1.5px solid var(--gp2);font-size:16px;background:var(--gp);color:var(--dark);outline:none;margin-bottom:10px;-webkit-appearance:none;}
+.auth-card input:focus{border-color:var(--z);background:var(--white);}
+.auth-btn{width:100%;padding:14px;border-radius:12px;border:none;background:var(--z);color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:4px;}
+.auth-btn:disabled{background:var(--z4);}
+.auth-toggle{width:100%;text-align:center;background:none;border:none;color:var(--z);font-size:13px;font-weight:600;cursor:pointer;margin-top:14px;}
+.auth-msg{font-size:13px;text-align:center;margin-bottom:12px;padding:9px;border-radius:9px;line-height:1.35;}
+.auth-msg.err{background:var(--red-bg);color:var(--red);}
+.auth-msg.ok{background:var(--green-bg);color:var(--green);}
+
+/* TOAST + LOADING */
+.toast{position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--dark);color:#fff;font-size:13px;padding:11px 18px;border-radius:22px;opacity:0;transition:opacity .25s,transform .25s;z-index:500;max-width:90%;text-align:center;pointer-events:none;}
+.toast.show{opacity:.95;transform:translateX(-50%) translateY(0);}
+.loading{min-height:100vh;display:flex;align-items:center;justify-content:center;color:var(--gp4);font-size:14px;padding:24px;text-align:center;}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+/* ===== CONFIG NUBE (Supabase) ===== */
+const SB_URL="https://sjbazgzcgmmevlmxxavv.supabase.co";
+const SB_KEY="sb_publishable_P54d2BRXd5eNFJsiOYdcSw_VxYhnPcs";
+
 const DEF_CATS=["Lácteos","Conservas","Verduras","Frutas","Congelados","Bebidas","Cereales","Carnes","Limpieza","Higiene","Hogar","Otros"];
 const DEF_SUPS=["Bon Preu","Ametller","Sorli","Mercadona","Bon Area","La Granja","Can Torrent","Mercat"];
-const KEY="despensa_v4";
+const CACHE="despensa_cloud_cache";
+const OLD_KEY="despensa_v4";
 
-function loadState(){
-  try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.items)return d;}catch{}
-  return{
-    items:[
-      {id:1,name:"Leche entera",category:"Lácteos",units:1,minStock:2,expiry:"2025-05-10",supermarket:"Mercadona"},
-      {id:2,name:"Tomate triturado",category:"Conservas",units:0,minStock:3,expiry:"2026-12-01",supermarket:"Bon Preu"},
-      {id:3,name:"Espinacas baby",category:"Verduras",units:2,minStock:1,expiry:"2025-05-20",supermarket:"Ametller"},
-      {id:4,name:"Papel cocina",category:"Hogar",units:3,minStock:2,expiry:"",supermarket:"Sorli"},
-    ],
-    cats:[...DEF_CATS],sups:[...DEF_SUPS],nextId:10
-  };
-}
+let S={items:[],cats:[...DEF_CATS],sups:[...DEF_SUPS]};
+let CAT={};            // catálogo maestro por código de barras
+let sb=null,sessionUser=null,authReady=false,dataLoaded=false,dataLoading=false;
+let authMode="in",authMsg="",authMsgType="err",authBusy=false,authEmail="";
 
-let S=loadState();
 let tab="inventory",search="",catF="Todos",supF="Todos",checked={};
 let modal=null,editId=null,buyId=null;
 let showNewCat=false,showNewSup=false;
 let addNote="";
 let scanner=null,scanMsg="",scanResult=null,scanBusy=false,camTried=false;
 
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch{}}
+/* ===== UTILES ===== */
 function daysUntil(d){if(!d)return null;return Math.ceil((new Date(d)-new Date())/86400000);}
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function nowIso(){return new Date().toISOString();}
 
+function toast(msg){
+  let t=document.getElementById("toast");
+  if(!t){t=document.createElement("div");t.id="toast";t.className="toast";document.body.appendChild(t);}
+  t.textContent=msg;t.classList.add("show");
+  clearTimeout(window._tt);window._tt=setTimeout(()=>{t.classList.remove("show");},2800);
+}
+
+function saveCache(){try{localStorage.setItem(CACHE,JSON.stringify({items:S.items,cats:S.cats,sups:S.sups,cat:CAT}));}catch{}}
+function loadCache(){try{const d=JSON.parse(localStorage.getItem(CACHE));if(d&&d.items){S.items=d.items;S.cats=(d.cats&&d.cats.length)?d.cats:[...DEF_CATS];S.sups=(d.sups&&d.sups.length)?d.sups:[...DEF_SUPS];CAT=d.cat||{};}}catch{}}
+
+/* ===== MAPEO FILA <-> APP ===== */
+function fromRow(r){return{id:r.id,name:r.name,category:r.category||"Otros",units:r.units||0,minStock:r.min_stock||1,expiry:r.expiry||"",supermarket:r.supermarket||"",barcode:r.barcode||""};}
+function toRow(f){return{name:(f.name||"").trim(),category:f.category||"Otros",units:parseInt(f.units)||0,min_stock:parseInt(f.minStock)||1,expiry:f.expiry?f.expiry:null,supermarket:f.supermarket||"",barcode:f.barcode||""};}
+
+/* ===== ACCESO A DATOS (Supabase) ===== */
+async function dbInsert(t,row){const{data,error}=await sb.from(t).insert(row).select().single();if(error)throw error;return data;}
+async function dbUpdate(t,id,row){const{data,error}=await sb.from(t).update(row).eq("id",id).select().single();if(error)throw error;return data;}
+async function dbDelete(t,id){const{error}=await sb.from(t).delete().eq("id",id);if(error)throw error;}
+
+async function ensurePrefs(){try{await sb.from("prefs").upsert({cats:S.cats,sups:S.sups,updated_at:nowIso()},{onConflict:"user_id"});}catch{}}
+
+async function upsertCatalog(f,incBought){
+  if(!f.barcode)return;
+  const prev=CAT[f.barcode];
+  const tb=(prev?prev.times_bought:0)+(incBought?1:0);
+  const row={barcode:f.barcode,name:f.name||(prev&&prev.name)||"",category:f.category||"Otros",supermarket:f.supermarket||"",times_bought:tb,last_used:nowIso()};
+  try{const{data}=await sb.from("catalog").upsert(row,{onConflict:"user_id,barcode"}).select().single();if(data)CAT[f.barcode]=data;}catch{}
+}
+
+async function bootData(){
+  if(dataLoading||dataLoaded)return;
+  dataLoading=true;
+  loadCache();render();
+  try{
+    const it=await sb.from("items").select("*").order("created_at",{ascending:true});
+    if(it.error)throw it.error;
+    const cat=await sb.from("catalog").select("*");
+    const pr=await sb.from("prefs").select("*").maybeSingle();
+    S.items=(it.data||[]).map(fromRow);
+    CAT={};(cat.data||[]).forEach(c=>{CAT[c.barcode]=c;});
+    if(pr&&pr.data){
+      S.cats=(pr.data.cats&&pr.data.cats.length)?pr.data.cats:[...DEF_CATS];
+      S.sups=(pr.data.sups&&pr.data.sups.length)?pr.data.sups:[...DEF_SUPS];
+    } else { await ensurePrefs(); }
+    await maybeMigrate();
+    dataLoaded=true;saveCache();
+  }catch(e){
+    toast("No se pudo cargar de la nube; mostrando copia local.");
+  }
+  dataLoading=false;render();
+}
+
+async function maybeMigrate(){
+  if(S.items.length)return;
+  let old=null;try{old=JSON.parse(localStorage.getItem(OLD_KEY));}catch{}
+  if(!old||!old.items||!old.items.length)return;
+  try{
+    const rows=old.items.map(o=>toRow(o));
+    const{data,error}=await sb.from("items").insert(rows).select();
+    if(!error&&data){S.items=data.map(fromRow);toast("Tus datos locales se han subido a la nube ✓");}
+    if((old.cats&&old.cats.length)||(old.sups&&old.sups.length)){
+      if(old.cats&&old.cats.length)S.cats=old.cats;
+      if(old.sups&&old.sups.length)S.sups=old.sups;
+      await ensurePrefs();
+    }
+  }catch{}
+}
+
+/* ===== AUTENTICACIÓN ===== */
+function renderAuth(){
+  return`<div class="auth">
+    <div class="auth-logo">🛒</div>
+    <div class="auth-title">Mi despensa</div>
+    <div class="auth-sub">${authMode==="in"?"Inicia sesión para ver tu despensa":"Crea tu cuenta"}</div>
+    <div class="auth-card">
+      ${authMsg?`<div class="auth-msg ${authMsgType}">${esc(authMsg)}</div>`:""}
+      <input type="email" id="au-email" placeholder="Email" value="${esc(authEmail)}" oninput="authEmail=this.value" autocomplete="email" autocapitalize="off" autocorrect="off">
+      <input type="password" id="au-pw" placeholder="Contraseña" autocomplete="${authMode==="in"?"current-password":"new-password"}">
+      <button class="auth-btn" onclick="doAuth()" ${authBusy?"disabled":""}>${authBusy?"…":(authMode==="in"?"Entrar":"Crear cuenta")}</button>
+      <button class="auth-toggle" onclick="toggleAuthMode()">${authMode==="in"?"¿No tienes cuenta? Crear una":"¿Ya tienes cuenta? Entrar"}</button>
+    </div>
+  </div>`;
+}
+function toggleAuthMode(){authMode=authMode==="in"?"up":"in";authMsg="";render();}
+function authErr(m){
+  m=String(m||"");
+  if(/Invalid login/i.test(m))return"Email o contraseña incorrectos.";
+  if(/Email not confirmed/i.test(m))return"Confirma tu email antes de entrar (revisa tu correo).";
+  if(/already registered|already been registered|User already/i.test(m))return"Ese email ya tiene cuenta. Inicia sesión.";
+  if(/rate limit|too many|For security/i.test(m))return"Demasiados intentos, espera un momento.";
+  if(/password should be|at least 6/i.test(m))return"La contraseña debe tener al menos 6 caracteres.";
+  return m;
+}
+async function doAuth(){
+  const email=((document.getElementById("au-email")||{}).value||"").trim();
+  const pw=((document.getElementById("au-pw")||{}).value||"");
+  authEmail=email;
+  if(!email||!pw){authMsg="Introduce email y contraseña.";authMsgType="err";render();return;}
+  if(authMode==="up"&&pw.length<6){authMsg="La contraseña debe tener al menos 6 caracteres.";authMsgType="err";render();return;}
+  authBusy=true;authMsg="";render();
+  try{
+    if(authMode==="up"){
+      const{data,error}=await sb.auth.signUp({email,password:pw,options:{emailRedirectTo:location.origin+location.pathname}});
+      if(error)throw error;
+      authBusy=false;
+      if(!data.session){
+        authMode="in";authMsgType="ok";
+        authMsg="Cuenta creada. Revisa tu email, confirma y luego entra.";
+        render();
+      }
+    }else{
+      const{error}=await sb.auth.signInWithPassword({email,password:pw});
+      if(error)throw error;
+    }
+  }catch(e){
+    authBusy=false;authMsgType="err";
+    authMsg=authErr(e&&e.message?e.message:"Error de autenticación");
+    render();
+  }
+}
+async function logout(){
+  if(!confirm("¿Cerrar sesión?"))return;
+  try{await sb.auth.signOut();}catch{}
+}
+
+/* ===== LÓGICA DE NEGOCIO ===== */
 function expiryTag(e){
   const d=daysUntil(e);if(d===null)return"";
   if(d<0)return`<span class="tag t-red">Caducado</span>`;
   if(d<=7)return`<span class="tag t-yellow">${d}d</span>`;
   return`<span class="tag t-green">${d}d</span>`;
 }
-
-function needsBuying(item){
-  const min=item.minStock||1;
-  return item.units<=min;
+function needsBuying(item){const min=item.minStock||1;return item.units<=min;}
+function mostUsedSup(){
+  const m={};S.items.forEach(i=>{if(i.supermarket)m[i.supermarket]=(m[i.supermarket]||0)+1;});
+  let best="",n=0;for(const k in m){if(m[k]>n){n=m[k];best=k;}}return best;
 }
-
 function chips(opts,active,fn){
   return opts.map(o=>`<button class="chip${active===o?" on":""}" onclick="${fn}('${esc(o)}')">${esc(o)}</button>`).join("");
+}
+
+/* ===== RENDER PRINCIPAL ===== */
+function render(){
+  const root=document.getElementById("root");
+  if(!root)return;
+  if(!sb){root.innerHTML=`<div class="loading">No se pudo conectar con la nube.<br>Recarga la página con conexión a internet.</div>`;return;}
+  if(!authReady){root.innerHTML=`<div class="loading">Cargando…</div>`;return;}
+  if(!sessionUser){root.innerHTML=renderAuth();return;}
+
+  const shopCount=S.items.filter(i=>needsBuying(i)).length;
+  const expired=S.items.filter(i=>{const d=daysUntil(i.expiry);return d!==null&&d<0;}).length;
+  const soon=S.items.filter(i=>{const d=daysUntil(i.expiry);return d!==null&&d>=0&&d<=7;}).length;
+
+  let h=`<div class="hdr">
+    <div class="hdr-top">
+      <div class="hdr-title">Mi despensa</div>
+      <button class="hdr-logout" onclick="logout()">Salir</button>
+    </div>
+    <div class="badges">
+      ${expired?`<span class="bdg bdg-red">${expired} caducado${expired>1?"s":""}</span>`:""}
+      ${soon?`<span class="bdg bdg-yellow">${soon} caduca pronto</span>`:""}
+      <span class="bdg">${S.items.length} productos</span>
+      ${shopCount?`<span class="bdg">${shopCount} por comprar</span>`:""}
+    </div>
+    <div class="tabs">
+      <button class="tab${tab==="inventory"?" on":""}" onclick="setTab('inventory')">Inventario</button>
+      <button class="tab${tab==="shopping"?" on":""}" onclick="setTab('shopping')">Lista compra${shopCount?` (${shopCount})`:""}</button>
+    </div>
+  </div>`;
+
+  h+=tab==="inventory"?renderInventory():renderShopping();
+  h+=`<div class="fab"><div class="fab-row">
+    <button class="fab-scan" onclick="openScan()">&#128247; Escanear</button>
+    <button class="fab-btn" onclick="openAdd()">+ Añadir producto</button>
+  </div></div>`;
+  if(modal==="add"||modal==="edit")h+=renderAddEdit();
+  if(modal==="buy")h+=renderBuy();
+  if(modal==="scan")h+=renderScan();
+
+  root.innerHTML=h;
+  if(modal==="add"||modal==="edit"){
+    const nc=document.getElementById("nc");if(nc)nc.focus();
+    const ns=document.getElementById("ns");if(ns)ns.focus();
+  }
+  if(modal==="scan"&&!scanResult&&!scanBusy){
+    const box=document.getElementById("scanner");
+    if(box){
+      if(!window.Html5Qrcode){box.innerHTML="<div class='scan-msg'>Sin conexión a la librería de escaneo. Usa &ldquo;Manual&rdquo;.</div>";}
+      else if(!scanner&&!camTried){camTried=true;startScanner();}
+    }
+  }
 }
 
 function renderInventory(){
@@ -201,7 +397,7 @@ function renderInventory(){
   </div>`;
   h+=`<div class="fbar">${chips(usedCats,catF,"setCatF")}</div>`;
   h+=`<div class="content">`;
-  if(!inv.length){h+=`<div class="empty">Sin resultados</div>`;}
+  if(!inv.length){h+=`<div class="empty">${dataLoading&&!dataLoaded?"Cargando…":"Sin resultados"}</div>`;}
   else{
     const grouped={};
     S.cats.forEach(cat=>{const g=inv.filter(i=>i.category===cat);if(g.length)grouped[cat]=g;});
@@ -210,7 +406,7 @@ function renderInventory(){
       items.forEach(item=>{
         const low=needsBuying(item);
         h+=`<div class="item-card">
-          <div class="item-info" onclick="openEdit(${item.id})">
+          <div class="item-info" onclick="openEdit('${item.id}')">
             <div class="item-name">${esc(item.name)}</div>
             <div class="item-sub">
               ${expiryTag(item.expiry)}
@@ -219,10 +415,10 @@ function renderInventory(){
             </div>
           </div>
           <div class="ctrls">
-            <button class="cbtn" onclick="chgUnits(${item.id},-1)">−</button>
+            <button class="cbtn" onclick="chgUnits('${item.id}',-1)">−</button>
             <span class="cqty${item.units===0||low?" low":""}">${item.units}</span>
-            <button class="cbtn" onclick="chgUnits(${item.id},1)">+</button>
-            <button class="del" onclick="delItem(${item.id})">✕</button>
+            <button class="cbtn" onclick="chgUnits('${item.id}',1)">+</button>
+            <button class="del" onclick="delItem('${item.id}')">✕</button>
           </div>
         </div>`;
       });
@@ -246,7 +442,7 @@ function renderShopping(){
   } else {
     function shopCard(item){
       const ck=!!checked[item.id];
-      return`<div class="shop-card${ck?" done-card":""}" onclick="openBuy(${item.id})">
+      return`<div class="shop-card${ck?" done-card":""}" onclick="openBuy('${item.id}')">
         <div class="chk${ck?" on":""}">${ck?"✓":""}</div>
         <div style="flex:1;min-width:0">
           <div class="shop-name${ck?" done":""}">${esc(item.name)}</div>
@@ -313,11 +509,16 @@ function renderAddEdit(){
         <div class="field-highlight-hint">Aparece en lista de la compra cuando queden menos de estas unidades</div>
       </div>
 
+      <div class="field">
+        <label>Código de barras (EAN)</label>
+        <input type="text" inputmode="numeric" value="${esc(f.barcode||"")}" oninput="setF('barcode',this.value)" placeholder="Opcional · se rellena al escanear" autocomplete="off">
+      </div>
+
       <div class="actions">
         <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
         <button class="btn-save" id="btn-sv" onclick="saveItem()" ${!valid?"disabled":""}>${isEdit?"Guardar":"Añadir"}</button>
       </div>
-      ${isEdit?`<button class="btn-danger" onclick="confirmDel(${editId})">Eliminar producto</button>`:""}
+      ${isEdit?`<button class="btn-danger" onclick="confirmDel('${editId}')">Eliminar producto</button>`:""}
     </div>
   </div>`;
 }
@@ -390,65 +591,96 @@ function renderScan(){
   </div>`;
 }
 
-function render(){
-  const shopCount=S.items.filter(i=>needsBuying(i)).length;
-  const expired=S.items.filter(i=>{const d=daysUntil(i.expiry);return d!==null&&d<0;}).length;
-  const soon=S.items.filter(i=>{const d=daysUntil(i.expiry);return d!==null&&d>=0&&d<=7;}).length;
-
-  let h=`<div class="hdr">
-    <div class="hdr-top">
-      <div class="hdr-title">Mi despensa</div>
-    </div>
-    <div class="badges">
-      ${expired?`<span class="bdg bdg-red">${expired} caducado${expired>1?"s":""}</span>`:""}
-      ${soon?`<span class="bdg bdg-yellow">${soon} caduca pronto</span>`:""}
-      <span class="bdg">${S.items.length} productos</span>
-      ${shopCount?`<span class="bdg">${shopCount} por comprar</span>`:""}
-    </div>
-    <div class="tabs">
-      <button class="tab${tab==="inventory"?" on":""}" onclick="setTab('inventory')">Inventario</button>
-      <button class="tab${tab==="shopping"?" on":""}" onclick="setTab('shopping')">Lista compra${shopCount?` (${shopCount})`:""}</button>
-    </div>
-  </div>`;
-
-  h+=tab==="inventory"?renderInventory():renderShopping();
-  h+=`<div class="fab"><div class="fab-row">
-    <button class="fab-scan" onclick="openScan()">&#128247; Escanear</button>
-    <button class="fab-btn" onclick="openAdd()">+ Añadir producto</button>
-  </div></div>`;
-  if(modal==="add"||modal==="edit")h+=renderAddEdit();
-  if(modal==="buy")h+=renderBuy();
-  if(modal==="scan")h+=renderScan();
-
-  document.getElementById("root").innerHTML=h;
-  if(modal==="add"||modal==="edit"){
-    const nc=document.getElementById("nc");if(nc)nc.focus();
-    const ns=document.getElementById("ns");if(ns)ns.focus();
-  }
-  if(modal==="scan"&&!scanResult&&!scanBusy){
-    const box=document.getElementById("scanner");
-    if(box){
-      if(!window.Html5Qrcode){box.innerHTML="<div class='scan-msg'>Sin conexión a la librería de escaneo. Usa &ldquo;Manual&rdquo;.</div>";}
-      else if(!scanner&&!camTried){camTried=true;startScanner();}
-    }
-  }
-}
-
+/* ===== ACCIONES UI ===== */
 function setTab(t){tab=t;search="";catF="Todos";supF="Todos";render();}
 function doSearch(v){search=v;render();}
 function setCatF(v){catF=v;render();}
 function setSupF(v){supF=v;render();}
-function chgUnits(id,d){const i=S.items.find(x=>x.id===id);if(i){i.units=Math.max(0,i.units+d);save();render();}}
-function delItem(id){S.items=S.items.filter(i=>i.id!==id);save();render();}
-function confirmDel(id){if(confirm("¿Eliminar este producto?")){delItem(id);closeModal();}}
-function toggleChk(id){checked[id]=!checked[id];render();}
+
+async function chgUnits(id,d){
+  const i=S.items.find(x=>x.id===id);if(!i)return;
+  i.units=Math.max(0,(parseInt(i.units)||0)+d);saveCache();render();
+  try{await dbUpdate("items",id,{units:i.units});}catch{toast("Cambio no sincronizado");}
+}
+async function delItem(id){
+  S.items=S.items.filter(i=>i.id!==id);saveCache();render();
+  try{await dbDelete("items",id);}catch{toast("No se pudo borrar en la nube");}
+}
+function confirmDel(id){if(confirm("¿Eliminar este producto?")){closeModal();delItem(id);}}
 function clearChk(){checked={};render();}
 
-function openAdd(){modal="add";editId=null;addNote="";window._f={name:"",category:S.cats[0]||"Otros",units:1,minStock:1,expiry:"",supermarket:""};showNewCat=false;showNewSup=false;render();}
-function openEdit(id){modal="edit";editId=id;const item=S.items.find(i=>i.id===id);window._f={...item};showNewCat=false;showNewSup=false;render();}
+function openAdd(){modal="add";editId=null;addNote="";window._f={name:"",category:S.cats[0]||"Otros",units:1,minStock:1,expiry:"",supermarket:"",barcode:""};showNewCat=false;showNewSup=false;render();}
+function openEdit(id){modal="edit";editId=id;const item=S.items.find(i=>i.id===id);window._f={...item};addNote="";showNewCat=false;showNewSup=false;render();}
 function openBuy(id){modal="buy";buyId=id;window._bf={units:1,expiry:""};render();}
 function closeModal(){modal=null;editId=null;buyId=null;addNote="";window._f=null;window._bf=null;showNewCat=false;showNewSup=false;render();}
 function ovClick(e){if(e.target.id==="ov")closeModal();}
+
+function setF(k,v){
+  if(!window._f)return;
+  window._f[k]=v;
+  if(k==="name"){const b=document.getElementById("btn-sv");if(b)b.disabled=!v.trim();}
+}
+function setBf(k,v){
+  if(!window._bf)window._bf={units:1,expiry:""};
+  window._bf[k]=v;
+  render();
+}
+
+function toggleNewCat(){showNewCat=!showNewCat;showNewSup=false;render();}
+function toggleNewSup(){showNewSup=!showNewSup;showNewCat=false;render();}
+
+function saveCat(){
+  const el=document.getElementById("nc");if(!el)return;
+  const v=el.value.trim();
+  if(v&&!S.cats.includes(v)){S.cats.push(v);saveCache();ensurePrefs();}
+  if(v&&window._f)window._f.category=v;
+  showNewCat=false;render();
+}
+function saveSup(){
+  const el=document.getElementById("ns");if(!el)return;
+  const v=el.value.trim();
+  if(v&&!S.sups.includes(v)){S.sups.push(v);saveCache();ensurePrefs();}
+  if(v&&window._f)window._f.supermarket=v;
+  showNewSup=false;render();
+}
+
+async function saveItem(){
+  const f=window._f;
+  if(!f||!f.name||!f.name.trim())return;
+  const wasEdit=modal==="edit";
+  const btn=document.getElementById("btn-sv");
+  if(btn){btn.disabled=true;btn.textContent="Guardando…";}
+  try{
+    if(wasEdit){
+      const row=await dbUpdate("items",editId,toRow(f));
+      const idx=S.items.findIndex(i=>i.id===editId);
+      if(idx>=0)S.items[idx]=fromRow(row);
+    }else{
+      const row=await dbInsert("items",toRow(f));
+      S.items.push(fromRow(row));
+    }
+    await upsertCatalog(f,false);
+    saveCache();closeModal();
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent=wasEdit?"Guardar":"Añadir";}
+    toast("No se pudo guardar. ¿Sin conexión?");
+  }
+}
+
+async function confirmBuy(){
+  const bf=window._bf;
+  if(!bf||!parseInt(bf.units))return;
+  const item=S.items.find(i=>i.id===buyId);
+  if(!item)return;
+  const id=buyId;
+  item.units=(parseInt(item.units)||0)+(parseInt(bf.units)||0);
+  if(bf.expiry)item.expiry=bf.expiry;
+  checked[id]=true;saveCache();
+  const row={units:item.units};if(bf.expiry)row.expiry=bf.expiry;
+  closeModal();
+  try{await dbUpdate("items",id,row);}catch{toast("Compra no sincronizada");}
+  upsertCatalog(item,true);
+}
 
 /* ===== ESCÁNER DE CÓDIGO DE BARRAS ===== */
 function getFmts(){
@@ -516,12 +748,14 @@ async function processCode(code){
   await stopScanner();
   const ex=S.items.find(i=>i.barcode&&i.barcode===code);
   if(ex){
-    ex.units=(parseInt(ex.units)||0)+1;
-    save();
-    scanResult={type:"restock",name:ex.name,units:ex.units};
-    render();
+    ex.units=(parseInt(ex.units)||0)+1;saveCache();
+    scanResult={type:"restock",name:ex.name,units:ex.units};render();
+    try{await dbUpdate("items",ex.id,{units:ex.units});}catch{toast("Cambio no sincronizado");}
+    upsertCatalog(ex,true);
     return;
   }
+  const c=CAT[code];
+  if(c&&c.name){prefillAdd(c.name,c.category||"Otros",code,"",c.supermarket||"");return;}
   scanMsg="Buscando producto…";render();
   await lookupBarcode(code);
 }
@@ -538,9 +772,9 @@ async function lookupBarcode(code){
         if(name&&!name.toLowerCase().includes(b.toLowerCase()))name=`${name} ${b}`;
         else if(!name)name=b;
       }
-      if(name){prefillAdd(name,guessCat(p),code,"");return;}
+      if(name){prefillAdd(name,guessCat(p),code,"",mostUsedSup());return;}
     }
-    prefillAdd("",S.cats[0]||"Otros",code,`Código ${code} no encontrado, complétalo a mano`);
+    prefillAdd("",S.cats[0]||"Otros",code,`Código ${code} no encontrado, complétalo a mano`,mostUsedSup());
   }catch(e){
     scanBusy=false;camTried=false;
     scanMsg="Sin conexión para buscar el producto. Pulsa “Manual” para añadirlo a mano.";
@@ -566,16 +800,16 @@ function guessCat(p){
   return S.cats.includes("Otros")?"Otros":(S.cats[0]||"Otros");
 }
 
-function prefillAdd(name,category,code,note){
+function prefillAdd(name,category,code,note,supermarket){
   modal="add";editId=null;addNote=note||"";
-  window._f={name:name||"",category:category||S.cats[0]||"Otros",units:1,minStock:1,expiry:"",supermarket:"",barcode:code||""};
+  window._f={name:name||"",category:category||S.cats[0]||"Otros",units:1,minStock:1,expiry:"",supermarket:supermarket||"",barcode:code||""};
   showNewCat=false;showNewSup=false;scanBusy=false;
   render();
 }
 
 async function manualFromScan(){
   await stopScanner();
-  prefillAdd("",S.cats[0]||"Otros","","");
+  prefillAdd("",S.cats[0]||"Otros","","","");
 }
 
 async function closeScan(){
@@ -584,60 +818,19 @@ async function closeScan(){
   render();
 }
 
-function setF(k,v){
-  if(!window._f)return;
-  window._f[k]=v;
-  if(k==="name"){const b=document.getElementById("btn-sv");if(b)b.disabled=!v.trim();}
-}
-function setBf(k,v){
-  if(!window._bf)window._bf={units:1,expiry:""};
-  window._bf[k]=v;
+/* ===== ARRANQUE ===== */
+function init(){
+  if(!window.supabase){sb=null;authReady=true;render();return;}
+  sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   render();
+  sb.auth.onAuthStateChange((e,session)=>{
+    sessionUser=(session&&session.user)?session.user:null;
+    authReady=true;
+    if(sessionUser){bootData();}
+    else{dataLoaded=false;dataLoading=false;S={items:[],cats:[...DEF_CATS],sups:[...DEF_SUPS]};CAT={};render();}
+  });
 }
-
-function toggleNewCat(){showNewCat=!showNewCat;showNewSup=false;render();}
-function toggleNewSup(){showNewSup=!showNewSup;showNewCat=false;render();}
-
-function saveCat(){
-  const el=document.getElementById("nc");if(!el)return;
-  const v=el.value.trim();
-  if(v&&!S.cats.includes(v)){S.cats.push(v);save();}
-  if(v&&window._f)window._f.category=v;
-  showNewCat=false;render();
-}
-function saveSup(){
-  const el=document.getElementById("ns");if(!el)return;
-  const v=el.value.trim();
-  if(v&&!S.sups.includes(v)){S.sups.push(v);save();}
-  if(v&&window._f)window._f.supermarket=v;
-  showNewSup=false;render();
-}
-
-function saveItem(){
-  const f=window._f;
-  if(!f||!f.name||!f.name.trim())return;
-  const item={...f,units:parseInt(f.units)||0,minStock:parseInt(f.minStock)||1};
-  if(modal==="edit"){
-    const idx=S.items.findIndex(i=>i.id===editId);
-    if(idx>=0)S.items[idx]={...item,id:editId};
-  } else {
-    S.items.push({...item,id:S.nextId++});
-  }
-  save();closeModal();
-}
-
-function confirmBuy(){
-  const bf=window._bf;
-  if(!bf||!parseInt(bf.units))return;
-  const item=S.items.find(i=>i.id===buyId);
-  if(!item)return;
-  item.units=(parseInt(item.units)||0)+(parseInt(bf.units)||0);
-  if(bf.expiry)item.expiry=bf.expiry;
-  checked[buyId]=true;
-  save();closeModal();
-}
-
-render();
+init();
 </script>
 </body>
 </html>
