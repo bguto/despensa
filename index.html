@@ -26,7 +26,7 @@ input,select,button{font-family:inherit;}
 
 /* HEADER */
 .hdr{background:var(--white);padding:env(safe-area-inset-top) 18px 0;position:sticky;top:0;z-index:10;border-bottom:1px solid var(--gp2);}
-.hdr-top{display:flex;align-items:center;justify-content:space-between;padding-top:14px;margin-bottom:6px;position:relative;}
+.hdr-top{display:flex;align-items:center;justify-content:space-between;padding-top:14px;margin-bottom:12px;position:relative;}
 .hdr-title{font-size:18px;font-weight:800;color:var(--dark);letter-spacing:-.02em;margin:0 auto;}
 .hdr-icon{background:var(--gp);border:1px solid var(--gp2);color:var(--dark2);font-size:15px;width:32px;height:32px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .hdr-logout{background:var(--gp);border:1px solid var(--gp2);color:var(--gp4);font-size:12px;font-weight:600;padding:6px 12px;border-radius:20px;cursor:pointer;flex-shrink:0;}
@@ -41,8 +41,8 @@ input,select,button{font-family:inherit;}
 .tab.on{color:var(--dark);background:var(--white);font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.06);}
 
 /* SEARCH */
-.search-wrap{padding:16px 18px 6px;background:var(--gp);}
-.search-box{display:flex;align-items:center;gap:10px;background:#F2F3EF;border-radius:14px;border:none;padding:13px 15px;}
+.search-wrap{padding:10px 18px 2px;background:var(--gp);}
+.search-box{display:flex;align-items:center;gap:9px;background:#F2F3EF;border-radius:12px;border:none;padding:9px 13px;}
 .search-box input{border:none;outline:none;font-size:16px;color:var(--dark);background:transparent;flex:1;width:100%;}
 .search-box input::placeholder{color:#a8a8a0;}
 .search-icon{color:#b6b6ad;font-size:14px;flex-shrink:0;}
@@ -184,6 +184,32 @@ input,select,button{font-family:inherit;}
 .auth-msg{font-size:13px;text-align:center;margin-bottom:12px;padding:9px;border-radius:11px;line-height:1.35;}
 .auth-msg.err{background:var(--red-bg);color:var(--red);}
 .auth-msg.ok{background:var(--green-bg);color:var(--green);}
+
+/* FLUIDEZ / MICROINTERACCIONES */
+html{scroll-behavior:smooth;}
+body{overscroll-behavior-y:contain;}
+button{transition:transform .12s ease,background .16s ease,color .16s ease,box-shadow .18s ease,opacity .16s ease;}
+button:active{transform:scale(.95);}
+.tab{transition:color .2s,background .2s,box-shadow .25s;}
+.chip{transition:background .18s,color .18s,transform .12s;}
+.chip:active{transform:scale(.93);}
+.cbtn:active{transform:scale(.86);}
+.item-card,.shop-card{transition:transform .15s ease,box-shadow .2s ease,border-color .18s ease;}
+.item-info:active{opacity:.5;}
+.shop-card:active{transform:scale(.99);}
+.cqty{transition:color .2s ease;}
+.swatch{transition:transform .12s ease,box-shadow .15s ease;}
+.swatch:active{transform:scale(.88);}
+.icon-tile{transition:transform .12s ease,background .15s ease,border-color .15s ease;}
+.icon-tile:active{transform:scale(.9);}
+.cfg-row{transition:transform .15s ease,border-color .15s ease;}
+.cfg-row:active{transform:scale(.99);}
+.sum-pill{transition:transform .15s ease;}
+.overlay.anim{animation:ovFade .22s ease;}
+.sheet.anim{animation:shUp .34s cubic-bezier(.22,.61,.36,1);}
+@keyframes ovFade{from{opacity:0}to{opacity:1}}
+@keyframes shUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
 </style>
 </head>
 <body>
@@ -213,7 +239,7 @@ let modal=null,editId=null,buyId=null;
 let showNewCat=false,showNewSup=false;
 let addNote="";
 let scanner=null,scanMsg="",scanResult=null,scanBusy=false,camTried=false;
-let settingsCat=null;
+let settingsCat=null,lastModalKey="";
 
 /* ===== UTILES ===== */
 function daysUntil(d){if(!d)return null;return Math.ceil((new Date(d)-new Date())/86400000);}
@@ -380,20 +406,15 @@ function render(){
   if(!sessionUser){root.innerHTML=renderAuth();return;}
 
   const shopCount=S.items.filter(i=>needsBuying(i)).length;
-  const expired=S.items.filter(i=>{const d=daysUntil(i.expiry);return d!==null&&d<0;}).length;
-  const soon=S.items.filter(i=>{const d=daysUntil(i.expiry);return d!==null&&d>=0&&d<=7;}).length;
+  const mkey=modal?(modal+"|"+(settingsCat||"")):"";
+  window._A=(mkey&&mkey!==lastModalKey)?" anim":"";
+  lastModalKey=mkey;
 
   let h=`<div class="hdr">
     <div class="hdr-top">
       <button class="hdr-icon" onclick="openSettings()">⚙</button>
       <div class="hdr-title">Mi despensa</div>
       <button class="hdr-logout" onclick="logout()">Salir</button>
-    </div>
-    <div class="badges">
-      ${expired?`<span class="bdg bdg-red">${expired} caducado${expired>1?"s":""}</span>`:""}
-      ${soon?`<span class="bdg bdg-yellow">${soon} caduca pronto</span>`:""}
-      <span class="bdg">${S.items.length} productos</span>
-      ${shopCount?`<span class="bdg">${shopCount} por comprar</span>`:""}
     </div>
     <div class="tabs">
       <button class="tab${tab==="shopping"?" on":""}" onclick="setTab('shopping')">Lista de compra${shopCount?` (${shopCount})`:""}</button>
@@ -514,8 +535,8 @@ function renderAddEdit(){
   const isEdit=modal==="edit";
   const f=window._f;
   const valid=f&&f.name&&f.name.trim().length>0;
-  return`<div class="overlay" id="ov" onclick="ovClick(event)">
-    <div class="sheet" onclick="event.stopPropagation()">
+  return`<div class="overlay${window._A||''}" id="ov" onclick="ovClick(event)">
+    <div class="sheet${window._A||''}" onclick="event.stopPropagation()">
       <div class="shandle"></div>
       <div class="stitle">${isEdit?"Editar producto":"Nuevo producto"}</div>
       ${addNote?`<div class="ssub">${esc(addNote)}</div>`:(isEdit?`<div class="ssub">Toca los campos para editar</div>`:"")}
@@ -581,8 +602,8 @@ function renderBuy(){
   const newTotal=(parseInt(item.units)||0)+(parseInt(bf.units)||0);
   const fmtDate=bf.expiry?new Date(bf.expiry).toLocaleDateString("es-ES"):"—";
   const valid=parseInt(bf.units)>0;
-  return`<div class="overlay" id="ov" onclick="ovClick(event)">
-    <div class="sheet" onclick="event.stopPropagation()">
+  return`<div class="overlay${window._A||''}" id="ov" onclick="ovClick(event)">
+    <div class="sheet${window._A||''}" onclick="event.stopPropagation()">
       <div class="shandle"></div>
       <div class="stitle">${esc(item.name)}</div>
       <div class="ssub">Stock actual: ${item.units} ud · Registrar compra</div>
@@ -599,13 +620,13 @@ function renderBuy(){
       </div>
 
       <div class="preview">
-        <div class="preview-line">${item.units} ud actuales + ${parseInt(bf.units)||0} compradas = <strong>${newTotal} ud</strong></div>
-        <div class="preview-sub">Caducidad: ${fmtDate}${newTotal>(item.minStock||1)?" · supera el mínimo ✓":" · aún bajo mínimo"}</div>
+        <div class="preview-line" id="buy-total">${item.units} ud actuales + ${parseInt(bf.units)||0} compradas = <strong>${newTotal} ud</strong></div>
+        <div class="preview-sub" id="buy-sub">Caducidad: ${fmtDate}${newTotal>(item.minStock||1)?" · supera el mínimo ✓":" · aún bajo mínimo"}</div>
       </div>
 
       <div class="actions">
         <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
-        <button class="btn-save" onclick="confirmBuy()" ${!valid?"disabled":""}>Confirmar compra</button>
+        <button class="btn-save" id="buy-save" onclick="confirmBuy()" ${!valid?"disabled":""}>Confirmar compra</button>
       </div>
     </div>
   </div>`;
@@ -633,8 +654,8 @@ function renderScan(){
       </div>
       <div class="actions"><button class="btn-cancel" style="flex:1" onclick="closeScan()">Cancelar</button></div>`;
   }
-  return`<div class="overlay" id="ovs" onclick="if(event.target.id==='ovs')closeScan()">
-    <div class="sheet" onclick="event.stopPropagation()">
+  return`<div class="overlay${window._A||''}" id="ovs" onclick="if(event.target.id==='ovs')closeScan()">
+    <div class="sheet${window._A||''}" onclick="event.stopPropagation()">
       <div class="shandle"></div>
       <div class="stitle">Escanear producto</div>
       ${body}
@@ -652,8 +673,8 @@ function renderSettings(){
       <span class="chev">›</span>
     </div>`;
   }).join("");
-  return`<div class="overlay" id="ovs" onclick="if(event.target.id==='ovs')closeModal()">
-    <div class="sheet" onclick="event.stopPropagation()">
+  return`<div class="overlay${window._A||''}" id="ovs" onclick="if(event.target.id==='ovs')closeModal()">
+    <div class="sheet${window._A||''}" onclick="event.stopPropagation()">
       <div class="shandle"></div>
       <div class="cfg-back"><span class="chev" onclick="closeModal()">‹</span><span class="ttl">Categorías</span><span style="width:22px"></span></div>
       ${rows}
@@ -667,8 +688,8 @@ function renderCatEditor(){
   const sw=CAT_PALETTE.map(c=>`<span class="swatch${c===cs.color?" on":""}" style="background:${c};color:${c}" onclick="setCatColor('${esc(cat)}','${c}')"></span>`).join("");
   let ig=`<span class="icon-tile${!cs.icon?" on":""}" onclick="setCatIcon('${esc(cat)}','')" style="font-size:13px">—</span>`;
   ig+=ICONS.map(ic=>`<span class="icon-tile${ic===cs.icon?" on":""}" onclick="setCatIcon('${esc(cat)}','${ic}')"><span style="font-size:20px">${ic}</span></span>`).join("");
-  return`<div class="overlay" id="ovs" onclick="if(event.target.id==='ovs')closeModal()">
-    <div class="sheet" onclick="event.stopPropagation()">
+  return`<div class="overlay${window._A||''}" id="ovs" onclick="if(event.target.id==='ovs')closeModal()">
+    <div class="sheet${window._A||''}" onclick="event.stopPropagation()">
       <div class="shandle"></div>
       <div class="cfg-back"><span class="chev" onclick="backToSettings()">‹</span><span class="ttl">${esc(cat)}</span><span style="width:22px"></span></div>
       <div class="cfg-row" style="cursor:default">
@@ -714,7 +735,13 @@ function setF(k,v){
 function setBf(k,v){
   if(!window._bf)window._bf={units:1,expiry:""};
   window._bf[k]=v;
-  render();
+  const item=S.items.find(i=>i.id===buyId);if(!item)return;
+  const bf=window._bf;
+  const newTotal=(parseInt(item.units)||0)+(parseInt(bf.units)||0);
+  const fmtDate=bf.expiry?new Date(bf.expiry).toLocaleDateString("es-ES"):"—";
+  const pl=document.getElementById("buy-total");if(pl)pl.innerHTML=`${item.units} ud actuales + ${parseInt(bf.units)||0} compradas = <strong>${newTotal} ud</strong>`;
+  const ps=document.getElementById("buy-sub");if(ps)ps.textContent=`Caducidad: ${fmtDate}${newTotal>(item.minStock||1)?" · supera el mínimo ✓":" · aún bajo mínimo"}`;
+  const sv=document.getElementById("buy-save");if(sv)sv.disabled=!(parseInt(bf.units)>0);
 }
 
 function toggleNewCat(){showNewCat=!showNewCat;showNewSup=false;render();}
